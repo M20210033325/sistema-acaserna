@@ -12,7 +12,7 @@ st.title("A CASERNA - Gestão e Controle de Produção (Nuvem)")
 # =============================================================================
 def conectar_db():
     # O sistema vai puxar o seu link secreto configurado no Streamlit Cloud
-    return psycopg2.connect(st.secrets["postgresql://postgres:[mXZO2mCZ3TEPqEte]@db.astunabkbghhpdlnybuw.supabase.co:5432/postgres"])
+    return psycopg2.connect(st.secrets["DATABASE_URL"])
 
 def criar_tabelas():
     conn = conectar_db()
