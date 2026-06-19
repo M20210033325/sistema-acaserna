@@ -305,7 +305,7 @@ with aba_estoque:
     st.subheader("🔄 Movimentação e Valoração de Estoque")
     
     conn = conectar_db()
-   df_insumos = pd.read_sql('SELECT nome AS "Insumo", unidade AS "Unidade", estoque AS "Qtd Atual", custo_unitario AS "Custo Médio (R$)" FROM insumos', conn)
+    df_insumos = pd.read_sql('SELECT nome AS "Insumo", unidade AS "Unidade", estoque AS "Qtd Atual", custo_unitario AS "Custo Médio (R$)" FROM insumos', conn)
     df_visual_insumos = df_insumos.copy()
     df_visual_insumos['Custo Médio (R$)'] = df_visual_insumos['Custo Médio (R$)'].apply(lambda x: f"R$ {x:.2f}")
     conn.close()
