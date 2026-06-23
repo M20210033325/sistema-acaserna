@@ -90,7 +90,7 @@ with aba_dash:
         col_grafico, col_dre = st.columns([1, 1])
         
         with col_grafico:
-            st.subheader("Custos de Produção por Produto")
+            st.subheader("Custos de Production por Produto")
             df_custo_prod = df_ops_dash[df_ops_dash['status'] == 'Concluída'].groupby('produto').agg(
                 Quantidade_Total=('quantidade', 'sum'),
                 Custo_Total_CMV=('custo_total', 'sum')
@@ -145,7 +145,8 @@ with aba_ops:
     custos_atuais = {row[0]: row[1] for row in cursor.fetchall()}
     conn.close()
     
-    fichas_tecnicas = {p[0]: {"grade": json.loads(p[1]), "receita": json.loads(p[2]), "foto": p[3]} for p in produtos_db}
+    # LINHA CORRIGIDA ABAIXO: foto agora usa bytes(p[3]) se existir para não quebrar no PostgreSQL/Supabase
+    fichas_tecnicas = {p[0]: {"grade": json.loads(p[1]), "receita": json.loads(p[2]), "foto": bytes(p[3]) if p[3] else None} for p in produtos_db}
     produtos_disp = list(fichas_tecnicas.keys())
     
     if produtos_disp:
@@ -387,7 +388,6 @@ with aba_fichas:
             if nome_p and grade_p and receita_temp:
                 conn = conectar_db()
                 cursor = conn.cursor()
-                # No Postgres usamos ON CONFLICT em vez de INSERT OR REPLACE
                 cursor.execute("""
                     INSERT INTO produtos (nome, grade, receita, foto) 
                     VALUES (%s, %s, %s, %s)
