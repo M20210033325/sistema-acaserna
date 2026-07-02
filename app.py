@@ -5,13 +5,11 @@ import json
 import base64
 
 st.set_page_config(layout="wide", page_title="Sistema de Produção Militar")
-st.title("A CASERNA - Gestão e Controle de Produção (Nuvem)")
 
 # =============================================================================
 # 1. FUNÇÕES DO BANCO DE DADOS (SUPABASE)
 # =============================================================================
 def conectar_db():
-    # O sistema vai puxar o seu link secreto configurado no Streamlit Cloud
     return psycopg2.connect(st.secrets["DATABASE_URL"])
 
 def criar_tabelas():
@@ -48,19 +46,29 @@ def criar_tabelas():
 
 criar_tabelas()
 
-aba_dash, aba_ops, aba_hist, aba_estoque, aba_fichas, aba_insumos = st.tabs([
-    "📊 Dashboard & DRE",
-    "📋 OPs Ativas", 
-    "📚 Histórico de OPs",
-    "📦 Estoque (Entradas/Saídas)",
-    "🛠️ Fichas Técnicas", 
-    "⚙️ Cadastro de Insumos"
-])
+# =============================================================================
+# MENU LATERAL
+# =============================================================================
+st.sidebar.image("https://cdn-icons-png.flaticon.com/512/2097/2097276.png", width=100)
+st.sidebar.title("Navegação")
+menu = st.sidebar.radio(
+    "Escolha o módulo:",
+    [
+        "📊 Dashboard & DRE",
+        "📋 OPs Ativas", 
+        "📚 Histórico de OPs",
+        "📦 Estoque (Entradas/Saídas)",
+        "🛠️ Fichas Técnicas", 
+        "⚙️ Cadastro de Insumos"
+    ]
+)
+
+st.title("A CASERNA - Gestão e Controle de Produção")
 
 # =============================================================================
-# ABA 1: DASHBOARD FINANCEIRO E OPERACIONAL
+# MÓDULO 1: DASHBOARD FINANCEIRO E OPERACIONAL
 # =============================================================================
-with aba_dash:
+if menu == "📊 Dashboard & DRE":
     st.subheader("Indicadores de Desempenho da Fábrica")
     
     conn = conectar_db()
@@ -90,7 +98,7 @@ with aba_dash:
         col_grafico, col_dre = st.columns([1, 1])
         
         with col_grafico:
-            st.subheader("Custos de Production por Produto")
+            st.subheader("Custos de Produção por Produto")
             df_custo_prod = df_ops_dash[df_ops_dash['status'] == 'Concluída'].groupby('produto').agg(
                 Quantidade_Total=('quantidade', 'sum'),
                 Custo_Total_CMV=('custo_total', 'sum')
@@ -132,20 +140,21 @@ with aba_dash:
                     st.error(f"**Atenção:** Operação registrando prejuízo bruto de {margem_bruta:.2f}%")
 
 # =============================================================================
-# ABA 2: OPs ATIVAS
+# MÓDULO 2: OPs ATIVAS
 # =============================================================================
-with aba_ops:
+elif menu == "📋 OPs Ativas":
     st.subheader("Gestão de OPs Ativas (Fila de Produção)")
     
+    # ⚡ OTIMIZAÇÃO: Traz tudo de uma vez para não travar a tela
     conn = conectar_db()
     cursor = conn.cursor()
     cursor.execute("SELECT nome, grade, receita, foto FROM produtos")
     produtos_db = cursor.fetchall()
     cursor.execute("SELECT nome, custo_unitario FROM insumos")
     custos_atuais = {row[0]: row[1] for row in cursor.fetchall()}
+    df_ops = pd.read_sql("SELECT * FROM ops WHERE status = 'Pendente'", conn)
     conn.close()
     
-    # LINHA CORRIGIDA ABAIXO: foto agora usa bytes(p[3]) se existir para não quebrar no PostgreSQL/Supabase
     fichas_tecnicas = {p[0]: {"grade": json.loads(p[1]), "receita": json.loads(p[2]), "foto": bytes(p[3]) if p[3] else None} for p in produtos_db}
     produtos_disp = list(fichas_tecnicas.keys())
     
@@ -171,10 +180,6 @@ with aba_ops:
                 st.rerun()
 
     st.write("---")
-    
-    conn = conectar_db()
-    df_ops = pd.read_sql("SELECT * FROM ops WHERE status = 'Pendente'", conn)
-    conn.close()
     
     if not df_ops.empty:
         for index, row in df_ops.iterrows():
@@ -215,12 +220,14 @@ with aba_ops:
                         conn = conectar_db()
                         cursor = conn.cursor()
                         custo_real = 0.0
+                        
+                        # ⚡ OTIMIZAÇÃO DE SALVAMENTO: Uso dos custos da memória em vez de buscar 1 a 1 no banco
                         for insumo, det in receita.items():
                             consumo_total = det['quantidade'] * qtd
-                            cursor.execute("SELECT custo_unitario FROM insumos WHERE nome = %s", (insumo,))
-                            c_unit = cursor.fetchone()[0]
+                            c_unit = custos_atuais.get(insumo, 0.0)
                             custo_real += (consumo_total * c_unit)
                             cursor.execute("UPDATE insumos SET estoque = estoque - %s WHERE nome = %s", (consumo_total, insumo))
+                            
                         cursor.execute("UPDATE ops SET status = 'Concluída', custo_total = %s WHERE id_op = %s", (custo_real, id_op))
                         conn.commit()
                         conn.close()
@@ -234,7 +241,6 @@ with aba_ops:
                         conn.close()
                         st.rerun()
                     
-                    # HTML Romaneio Ativo
                     html_linhas = ""
                     for insumo, det in receita.items():
                         html_linhas += f"<tr><td>{insumo}</td><td style='text-align: center;'>{det['quantidade']:.2f}</td><td style='text-align: center;'><strong>{det['quantidade'] * qtd:.2f}</strong></td><td>{det['unidade']}</td><td style='text-align: center; color: #ccc;'>[  ]</td></tr>"
@@ -247,9 +253,9 @@ with aba_ops:
         st.info("Nenhuma OP pendente no momento. O chão de fábrica está livre!")
 
 # =============================================================================
-# ABA 3: HISTÓRICO DE OPs
+# MÓDULO 3: HISTÓRICO DE OPs
 # =============================================================================
-with aba_hist:
+elif menu == "📚 Histórico de OPs":
     st.subheader("📚 Histórico de OPs Concluídas")
     
     conn = conectar_db()
@@ -267,9 +273,14 @@ with aba_hist:
             
             with st.container(border=True):
                 c_foto, c_info, c_mat, c_custo = st.columns([1.2, 2, 3, 2])
-                ficha = fichas_tecnicas.get(prod, {})
-                receita = ficha.get("receita", {})
-                foto_blob = ficha.get("foto")
+                conn = conectar_db()
+                cursor = conn.cursor()
+                cursor.execute("SELECT receita, foto FROM produtos WHERE nome = %s", (prod,))
+                p_data = cursor.fetchone()
+                conn.close()
+                
+                receita = json.loads(p_data[0]) if p_data else {}
+                foto_blob = bytes(p_data[1]) if p_data and p_data[1] else None
                 
                 with c_foto:
                     if foto_blob: st.image(foto_blob, use_container_width=True)
@@ -300,9 +311,9 @@ with aba_hist:
         st.info("O histórico de OPs está vazio.")
 
 # =============================================================================
-# ABA 4: CONTROLE DE ESTOQUE E VALORAÇÃO
+# MÓDULO 4: CONTROLE DE ESTOQUE E VALORAÇÃO
 # =============================================================================
-with aba_estoque:
+elif menu == "📦 Estoque (Entradas/Saídas)":
     st.subheader("🔄 Movimentação e Valoração de Estoque")
     
     conn = conectar_db()
@@ -353,11 +364,15 @@ with aba_estoque:
     st.dataframe(df_visual_insumos, use_container_width=True, hide_index=True)
 
 # =============================================================================
-# ABA 5: CADASTRO E EDIÇÃO DE FICHAS TÉCNICAS
+# MÓDULO 5: CADASTRO E EDIÇÃO DE FICHAS TÉCNICAS
 # =============================================================================
-with aba_fichas:
+elif menu == "🛠️ Fichas Técnicas":
+    # ⚡ OTIMIZAÇÃO: Cria um dicionário de unidades na memória (Zero consultas extras na escolha!)
     conn = conectar_db()
-    lista_disp = pd.read_sql("SELECT nome FROM insumos", conn)['nome'].tolist()
+    df_insumos = pd.read_sql("SELECT nome, unidade FROM insumos", conn)
+    lista_disp = df_insumos['nome'].tolist()
+    dict_unidades = dict(zip(df_insumos['nome'], df_insumos['unidade']))
+    
     cursor = conn.cursor()
     cursor.execute("SELECT nome, grade, receita FROM produtos")
     fichas_cad = {p[0]: {"grade": json.loads(p[1]), "receita": json.loads(p[2])} for p in cursor.fetchall()}
@@ -374,13 +389,10 @@ with aba_fichas:
             ins_sel = st.multiselect("Insumos desta receita:", lista_disp)
             receita_temp = {}
             if ins_sel:
-                conn = conectar_db()
+                # ⚡ Puxa da memória instantaneamente
                 for i in ins_sel:
-                    cursor = conn.cursor()
-                    cursor.execute("SELECT unidade FROM insumos WHERE nome = %s", (i,))
-                    u = cursor.fetchone()[0]
+                    u = dict_unidades.get(i, "")
                     receita_temp[i] = {'quantidade': st.number_input(f"Consumo {i} ({u}):", min_value=0.0, step=0.1, format="%.2f", key=f"c_{i}"), 'unidade': u}
-                conn.close()
         with col_c2:
             foto_p = st.file_uploader("Foto do Produto", type=["png", "jpg", "jpeg"])
 
@@ -415,14 +427,11 @@ with aba_fichas:
                 n_ins_sel = st.multiselect("Receita:", lista_disp, default=ins_val)
                 r_edit = {}
                 if n_ins_sel:
-                    conn = conectar_db()
+                    # ⚡ Puxa da memória instantaneamente
                     for i in n_ins_sel:
-                        cursor = conn.cursor()
-                        cursor.execute("SELECT unidade FROM insumos WHERE nome = %s", (i,))
-                        u = cursor.fetchone()[0]
+                        u = dict_unidades.get(i, "")
                         v_padrao = dados_ant["receita"].get(i, {}).get("quantidade", 0.0)
                         r_edit[i] = {'quantidade': st.number_input(f"Consumo {i} ({u}):", min_value=0.0, step=0.1, value=v_padrao, key=f"e_{i}"), 'unidade': u}
-                    conn.close()
             with col_e2:
                 n_foto = st.file_uploader("Substituir Foto", type=["png", "jpg", "jpeg"])
 
@@ -466,11 +475,14 @@ with aba_fichas:
                     st.rerun()
 
 # =============================================================================
-# ABA 6: CADASTRO E EDIÇÃO DE INSUMOS
+# MÓDULO 6: CADASTRO E EDIÇÃO DE INSUMOS
 # =============================================================================
-with aba_insumos:
+elif menu == "⚙️ Cadastro de Insumos":
+    # ⚡ OTIMIZAÇÃO: Cria o dicionário direto na memória e fecha a conexão
     conn = conectar_db()
-    lista_ins = pd.read_sql("SELECT nome FROM insumos", conn)['nome'].tolist()
+    df_insumos = pd.read_sql("SELECT nome, unidade FROM insumos", conn)
+    lista_ins = df_insumos['nome'].tolist()
+    dict_unidades = dict(zip(df_insumos['nome'], df_insumos['unidade']))
     conn.close()
 
     acao_ins = st.radio("Ação matéria-prima:", ["Cadastrar Novo Insumo", "✏️ Editar Insumo Existente"], horizontal=True)
@@ -502,11 +514,9 @@ with aba_insumos:
             st.info("Nenhum insumo.")
         else:
             ins_edit = st.selectbox("Selecione:", lista_ins)
-            conn = conectar_db()
-            cursor = conn.cursor()
-            cursor.execute("SELECT unidade FROM insumos WHERE nome = %s", (ins_edit,))
-            u_atual = cursor.fetchone()[0]
-            conn.close()
+            
+            # ⚡ OTIMIZAÇÃO: Busca a unidade sem precisar ir na nuvem!
+            u_atual = dict_unidades.get(ins_edit, "Unidades")
             
             c_ed1, c_ed2 = st.columns(2)
             u_lista = ["Unidades", "Metros", "Rolos", "Kg", "Pares"]
