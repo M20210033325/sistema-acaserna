@@ -3,8 +3,9 @@ import pandas as pd
 import psycopg2
 import json
 import base64
+from datetime import datetime
 
-st.set_page_config(layout="wide", page_title="Sistema de Produção Militar")
+st.set_page_config(layout="wide", page_title="Sistema de Production Militar")
 
 # =============================================================================
 # 1. FUNÇÕES DO BANCO DE DADOS (SUPABASE)
@@ -216,6 +217,12 @@ elif menu == "📋 OPs Ativas":
                     custo_estimado = sum((det['quantidade'] * qtd) * custos_atuais.get(insumo, 0.0) for insumo, det in receita.items())
                     st.markdown(f"**CMV Estimado: R$ {custo_estimado:.2f}**")
                     
+                    st.write("---")
+                    # Caixinha para colocar o valor pago por peça para o João
+                    valor_peca_joao = st.number_input("Valor por peça p/ João (R$):", min_value=0.0, step=0.50, format="%.2f", key=f"joao_{id_op}")
+                    valor_total_joao = valor_peca_joao * qtd
+                    st.caption(f"Total Mão de Obra: R$ {valor_total_joao:.2f}")
+                    
                     if st.button(f"✅ Concluir OP (Dar Baixa)", key=f"concluir_{id_op}"):
                         conn = conectar_db()
                         cursor = conn.cursor()
@@ -241,12 +248,15 @@ elif menu == "📋 OPs Ativas":
                         conn.close()
                         st.rerun()
                     
+                    # Gera a data atual de criação de forma automática
+                    data_atual = datetime.now().strftime("%d/%m/%Y")
+                    
                     html_linhas = ""
                     for insumo, det in receita.items():
                         html_linhas += f"<tr><td>{insumo}</td><td style='text-align: center;'>{det['quantidade']:.2f}</td><td style='text-align: center;'><strong>{det['quantidade'] * qtd:.2f}</strong></td><td>{det['unidade']}</td><td style='text-align: center; color: #ccc;'>[  ]</td></tr>"
                     
                     img_html = f'<img src="data:image/jpeg;base64,{base64.b64encode(foto_blob).decode("utf-8")}" style="max-width: 100%; max-height: 120px; object-fit: contain; border-radius: 4px;">' if foto_blob else '<span style="color: #999; font-size: 11px;">FOTO NÃO CADASTRADA</span>'
-                    html_romaneio = f"""<!DOCTYPE html><html><head><meta charset="utf-8"><title>Romaneio_{id_op}</title><style>body {{ font-family: Arial, sans-serif; margin: 35px; color: #222; }} .header {{ text-align: center; border-bottom: 3px double #111; padding-bottom: 10px; margin-bottom: 25px; }} .header h1 {{ margin: 0; font-size: 24px; font-weight: bold; }} .info-table {{ width: 100%; margin-bottom: 25px; border-collapse: collapse; }} .info-table td {{ padding: 9px; border: 1px solid #999; font-size: 13px; }} .info-table td.label {{ font-weight: bold; background-color: #f7f7f7; width: 20%; }} .section-title {{ font-size: 14px; font-weight: bold; margin-top: 25px; background-color: #111; color: #fff; padding: 6px 10px; }} .materials-table {{ width: 100%; border-collapse: collapse; margin-top: 5px; }} .materials-table th, .materials-table td {{ border: 1px solid #444; padding: 9px; font-size: 13px; }} .materials-table th {{ background-color: #dddddd; font-weight: bold; }} .signatures {{ margin-top: 70px; width: 100%; border-collapse: collapse; }} .signatures td {{ width: 50%; text-align: center; vertical-align: bottom; height: 50px; font-size: 12px; }} .line {{ border-top: 1px solid #333; width: 75%; margin: 0 auto 6px auto; }}</style></head><body><div class="header"><h1>A CASERNA DESDE 1977</h1><h2>ROMANEIO OPERACIONAL DE PRODUÇÃO</h2></div><table class="info-table"><tr><td rowspan="3" style="width: 140px; text-align: center; vertical-align: middle; padding: 5px; background-color: #fcfcfc;">{img_html}</td><td class="label">Código da OP:</td><td><strong>{id_op}</strong></td><td class="label">Status:</td><td>{status}</td></tr><tr><td class="label">Produto Final:</td><td>{prod}</td><td class="label">Grade / Tamanho:</td><td>{tam}</td></tr><tr><td class="label">Qtd Programada:</td><td><strong>{qtd} un</strong></td><td class="label">Custo Estimado:</td><td>R$ {custo_estimado:.2f}</td></tr></table><div class="section-title">EXPLOSÃO DE MATERIAIS (SEPARAÇÃO E CORTE)</div><table class="materials-table"><thead><tr><th>Descrição da Matéria-Prima / Insumo</th><th style="text-align: center;">Consumo Unit.</th><th style="text-align: center;">Qtd Total Requerida</th><th>Unidade</th><th style="text-align: center;">Conferido</th></tr></thead><tbody>{html_linhas}</tbody></table><table class="signatures"><tr><td><div class="line"></div>Responsável pela Separação</td><td><div class="line"></div>Responsável pelo Chão de Fábrica</td></tr></table><script>window.onload = function() {{ window.print(); }}</script></body></html>"""
+                    html_romaneio = f"""<!DOCTYPE html><html><head><meta charset="utf-8"><title>Romaneio_{id_op}</title><style>body {{ font-family: Arial, sans-serif; margin: 35px; color: #222; }} .header {{ text-align: center; border-bottom: 3px double #111; padding-bottom: 10px; margin-bottom: 25px; }} .header h1 {{ margin: 0; font-size: 24px; font-weight: bold; }} .info-table {{ width: 100%; margin-bottom: 25px; border-collapse: collapse; }} .info-table td {{ padding: 9px; border: 1px solid #999; font-size: 13px; }} .info-table td.label {{ font-weight: bold; background-color: #f7f7f7; width: 20%; }} .section-title {{ font-size: 14px; font-weight: bold; margin-top: 25px; background-color: #111; color: #fff; padding: 6px 10px; }} .materials-table {{ width: 100%; border-collapse: collapse; margin-top: 5px; }} .materials-table th, .materials-table td {{ border: 1px solid #444; padding: 9px; font-size: 13px; }} .materials-table th {{ background-color: #dddddd; font-weight: bold; }} .signatures {{ margin-top: 70px; width: 100%; border-collapse: collapse; }} .signatures td {{ width: 50%; text-align: center; vertical-align: bottom; height: 50px; font-size: 12px; }} .line {{ border-top: 1px solid #333; width: 75%; margin: 0 auto 6px auto; }}</style></head><body><div class="header"><h1>A CASERNA DESDE 1977</h1><h2>ROMANEIO OPERACIONAL DE PRODUÇÃO</h2></div><table class="info-table"><tr><td rowspan="5" style="width: 140px; text-align: center; vertical-align: middle; padding: 5px; background-color: #fcfcfc;">{img_html}</td><td class="label">Código da OP:</td><td><strong>{id_op}</strong></td><td class="label">Data de Emissão:</td><td><strong>{data_atual}</strong></td></tr><tr><td class="label">Produto Final:</td><td>{prod}</td><td class="label">Grade / Tamanho:</td><td>{tam}</td></tr><tr><td class="label">Qtd Programada:</td><td><strong>{qtd} un</strong></td><td class="label">Custo Material:</td><td>R$ {custo_estimado:.2f}</td></tr><tr><td class="label">Valor p/ Peça (João):</td><td>R$ {valor_peca_joao:.2f}</td><td class="label">Total Mão de Obra:</td><td><strong>R$ {valor_total_joao:.2f}</strong></td></tr><tr><td class="label">Horário de Início:</td><td>_____:_____</td><td class="label">Horário de Término:</td><td>_____:_____</td></tr></table><div class="section-title">EXPLOSÃO DE MATERIAIS (SEPARAÇÃO E CORTE)</div><table class="materials-table"><thead><tr><th>Descrição da Matéria-Prima / Insumo</th><th style="text-align: center;">Consumo Unit.</th><th style="text-align: center;">Qtd Total Requerida</th><th>Unidade</th><th style="text-align: center;">Conferido</th></tr></thead><tbody>{html_linhas}</tbody></table><table class="signatures"><tr><td><div class="line"></div>Responsável pela Separação</td><td><div class="line"></div>João (Chão de Fábrica)</td></tr></table><script>window.onload = function() {{ window.print(); }}</script></body></html>"""
                     st.write("")
                     st.download_button(label="🖨️ Imprimir Romaneio", data=html_romaneio, file_name=f"romaneio_{id_op}.html", mime="text/html", key=f"print_{id_op}")
     else:
@@ -392,7 +402,7 @@ elif menu == "🛠️ Fichas Técnicas":
                 # ⚡ Puxa da memória instantaneamente
                 for i in ins_sel:
                     u = dict_unidades.get(i, "")
-                    receita_temp[i] = {'quantidade': st.number_input(f"Consumo {i} ({u}):", min_value=0.0, step=0.1, format="%.2f", key=f"c_{i}"), 'unidade': u}
+                    receita_temp[i] = {'whitespace': st.number_input(f"Consumo {i} ({u}):", min_value=0.0, step=0.1, format="%.2f", key=f"c_{i}"), 'unidade': u}
         with col_c2:
             foto_p = st.file_uploader("Foto do Produto", type=["png", "jpg", "jpeg"])
 
