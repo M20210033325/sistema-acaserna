@@ -3,9 +3,9 @@ import pandas as pd
 import psycopg2
 import json
 import base64
-from datetime import datetime
+import datetime
 
-st.set_page_config(layout="wide", page_title="Sistema de Production Militar")
+st.set_page_config(layout="wide", page_title="Sistema de Produção Militar")
 
 # =============================================================================
 # 1. FUNÇÕES DO BANCO DE DADOS (SUPABASE)
@@ -16,6 +16,8 @@ def conectar_db():
 def criar_tabelas():
     conn = conectar_db()
     cursor = conn.cursor()
+    
+    # Criação padrão das tabelas
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS insumos (
             nome TEXT PRIMARY KEY,
@@ -42,6 +44,11 @@ def criar_tabelas():
             custo_total DOUBLE PRECISION
         )
     ''')
+    
+    # Adicionando colunas de Mão de Obra caso não existam (PostgreSQL)
+    cursor.execute("ALTER TABLE ops ADD COLUMN IF NOT EXISTS custo_mo DOUBLE PRECISION DEFAULT 0.0")
+    cursor.execute("ALTER TABLE ops ADD COLUMN IF NOT EXISTS tempo_gasto TEXT DEFAULT ''")
+    
     conn.commit()
     conn.close()
 
@@ -57,6 +64,7 @@ menu = st.sidebar.radio(
     [
         "📊 Dashboard & DRE",
         "📋 OPs Ativas", 
+        "⏱️ Apontamento de Horas",
         "📚 Histórico de OPs",
         "📦 Estoque (Entradas/Saídas)",
         "🛠️ Fichas Técnicas", 
@@ -92,7 +100,7 @@ if menu == "📊 Dashboard & DRE":
         with card3:
             st.metric("Total de Peças Produzidas", f"{total_pecas_produzidas} un")
         with card4:
-            st.metric("CMV Total Acumulado (Custo)", f"R$ {cmv_total_acumulado:.2f}", delta_color="inverse")
+            st.metric("Custo Geral Acumulado", f"R$ {cmv_total_acumulado:.2f}", delta_color="inverse")
             
         st.divider()
         
@@ -131,7 +139,7 @@ if menu == "📊 Dashboard & DRE":
             st.write("---")
             with st.container(border=True):
                 st.markdown(f"**(+) RECEITA BRUTA DE VENDAS:** R$ {receita_vendas:.2f}")
-                st.markdown(f"**(-) CUSTO DAS MERCADORIAS VENDIDAS (CMV):** R$ {cmv_total_acumulado:.2f}")
+                st.markdown(f"**(-) CUSTO DAS MERCADORIAS (MATERIAL + MÃO DE OBRA):** R$ {cmv_total_acumulado:.2f}")
                 st.write("---")
                 if lucro_bruto >= 0:
                     st.markdown(f"### 💰 RESULTADO BRUTO DO PERÍODO: R$ {lucro_bruto:.2f}")
@@ -146,7 +154,6 @@ if menu == "📊 Dashboard & DRE":
 elif menu == "📋 OPs Ativas":
     st.subheader("Gestão de OPs Ativas (Fila de Produção)")
     
-    # ⚡ OTIMIZAÇÃO: Traz tudo de uma vez para não travar a tela
     conn = conectar_db()
     cursor = conn.cursor()
     cursor.execute("SELECT nome, grade, receita, foto FROM produtos")
@@ -174,7 +181,7 @@ elif menu == "📋 OPs Ativas":
                 cursor = conn.cursor()
                 cursor.execute("SELECT id_op FROM ops")
                 novo_id = f"OP-{(len(cursor.fetchall()) + 1):03d}"
-                cursor.execute("INSERT INTO ops VALUES (%s, %s, %s, %s, 'Pendente', 0.0)", (novo_id, prod_sel, tam_sel, qtd_dig))
+                cursor.execute("INSERT INTO ops (id_op, produto, tamanho, quantidade, status, custo_total) VALUES (%s, %s, %s, %s, 'Pendente', 0.0)", (novo_id, prod_sel, tam_sel, qtd_dig))
                 conn.commit()
                 conn.close()
                 st.success(f"{novo_id} gerada com sucesso!")
@@ -215,20 +222,16 @@ elif menu == "📋 OPs Ativas":
                             
                 with c_acao:
                     custo_estimado = sum((det['quantidade'] * qtd) * custos_atuais.get(insumo, 0.0) for insumo, det in receita.items())
-                    st.markdown(f"**CMV Estimado: R$ {custo_estimado:.2f}**")
+                    st.markdown(f"**CMV Estimado (Só Material): R$ {custo_estimado:.2f}**")
                     
                     st.write("---")
-                    # Caixinha para colocar o valor pago por peça para o João
-                    valor_peca_joao = st.number_input("Valor por peça p/ João (R$):", min_value=0.0, step=0.50, format="%.2f", key=f"joao_{id_op}")
-                    valor_total_joao = valor_peca_joao * qtd
-                    st.caption(f"Total Mão de Obra: R$ {valor_total_joao:.2f}")
+                    st.caption("Para concluir apontando a mão de obra, vá na aba **Apontamento de Horas**.")
                     
-                    if st.button(f"✅ Concluir OP (Dar Baixa)", key=f"concluir_{id_op}"):
+                    if st.button(f"✅ Conclusão Rápida (Sem Mão de Obra)", key=f"concluir_{id_op}"):
                         conn = conectar_db()
                         cursor = conn.cursor()
                         custo_real = 0.0
                         
-                        # ⚡ OTIMIZAÇÃO DE SALVAMENTO: Uso dos custos da memória em vez de buscar 1 a 1 no banco
                         for insumo, det in receita.items():
                             consumo_total = det['quantidade'] * qtd
                             c_unit = custos_atuais.get(insumo, 0.0)
@@ -248,19 +251,98 @@ elif menu == "📋 OPs Ativas":
                         conn.close()
                         st.rerun()
                     
-                    # Gera a data atual de criação de forma automática
-                    data_atual = datetime.now().strftime("%d/%m/%Y")
+                    data_atual = datetime.datetime.now().strftime("%d/%m/%Y")
                     
                     html_linhas = ""
                     for insumo, det in receita.items():
                         html_linhas += f"<tr><td>{insumo}</td><td style='text-align: center;'>{det['quantidade']:.2f}</td><td style='text-align: center;'><strong>{det['quantidade'] * qtd:.2f}</strong></td><td>{det['unidade']}</td><td style='text-align: center; color: #ccc;'>[  ]</td></tr>"
                     
                     img_html = f'<img src="data:image/jpeg;base64,{base64.b64encode(foto_blob).decode("utf-8")}" style="max-width: 100%; max-height: 120px; object-fit: contain; border-radius: 4px;">' if foto_blob else '<span style="color: #999; font-size: 11px;">FOTO NÃO CADASTRADA</span>'
-                    html_romaneio = f"""<!DOCTYPE html><html><head><meta charset="utf-8"><title>Romaneio_{id_op}</title><style>body {{ font-family: Arial, sans-serif; margin: 35px; color: #222; }} .header {{ text-align: center; border-bottom: 3px double #111; padding-bottom: 10px; margin-bottom: 25px; }} .header h1 {{ margin: 0; font-size: 24px; font-weight: bold; }} .info-table {{ width: 100%; margin-bottom: 25px; border-collapse: collapse; }} .info-table td {{ padding: 9px; border: 1px solid #999; font-size: 13px; }} .info-table td.label {{ font-weight: bold; background-color: #f7f7f7; width: 20%; }} .section-title {{ font-size: 14px; font-weight: bold; margin-top: 25px; background-color: #111; color: #fff; padding: 6px 10px; }} .materials-table {{ width: 100%; border-collapse: collapse; margin-top: 5px; }} .materials-table th, .materials-table td {{ border: 1px solid #444; padding: 9px; font-size: 13px; }} .materials-table th {{ background-color: #dddddd; font-weight: bold; }} .signatures {{ margin-top: 70px; width: 100%; border-collapse: collapse; }} .signatures td {{ width: 50%; text-align: center; vertical-align: bottom; height: 50px; font-size: 12px; }} .line {{ border-top: 1px solid #333; width: 75%; margin: 0 auto 6px auto; }}</style></head><body><div class="header"><h1>A CASERNA DESDE 1977</h1><h2>ROMANEIO OPERACIONAL DE PRODUÇÃO</h2></div><table class="info-table"><tr><td rowspan="5" style="width: 140px; text-align: center; vertical-align: middle; padding: 5px; background-color: #fcfcfc;">{img_html}</td><td class="label">Código da OP:</td><td><strong>{id_op}</strong></td><td class="label">Data de Emissão:</td><td><strong>{data_atual}</strong></td></tr><tr><td class="label">Produto Final:</td><td>{prod}</td><td class="label">Grade / Tamanho:</td><td>{tam}</td></tr><tr><td class="label">Qtd Programada:</td><td><strong>{qtd} un</strong></td><td class="label">Custo Material:</td><td>R$ {custo_estimado:.2f}</td></tr><tr><td class="label">Valor p/ Peça (João):</td><td>R$ {valor_peca_joao:.2f}</td><td class="label">Total Mão de Obra:</td><td><strong>R$ {valor_total_joao:.2f}</strong></td></tr><tr><td class="label">Horário de Início:</td><td>_____:_____</td><td class="label">Horário de Término:</td><td>_____:_____</td></tr></table><div class="section-title">EXPLOSÃO DE MATERIAIS (SEPARAÇÃO E CORTE)</div><table class="materials-table"><thead><tr><th>Descrição da Matéria-Prima / Insumo</th><th style="text-align: center;">Consumo Unit.</th><th style="text-align: center;">Qtd Total Requerida</th><th>Unidade</th><th style="text-align: center;">Conferido</th></tr></thead><tbody>{html_linhas}</tbody></table><table class="signatures"><tr><td><div class="line"></div>Responsável pela Separação</td><td><div class="line"></div>João (Chão de Fábrica)</td></tr></table><script>window.onload = function() {{ window.print(); }}</script></body></html>"""
+                    
+                    html_romaneio = f"""<!DOCTYPE html><html><head><meta charset="utf-8"><title>Romaneio_{id_op}</title><style>body {{ font-family: Arial, sans-serif; margin: 35px; color: #222; }} .header {{ text-align: center; border-bottom: 3px double #111; padding-bottom: 10px; margin-bottom: 25px; }} .header h1 {{ margin: 0; font-size: 24px; font-weight: bold; }} .info-table {{ width: 100%; margin-bottom: 25px; border-collapse: collapse; }} .info-table td {{ padding: 9px; border: 1px solid #999; font-size: 13px; }} .info-table td.label {{ font-weight: bold; background-color: #f7f7f7; width: 20%; }} .section-title {{ font-size: 14px; font-weight: bold; margin-top: 25px; background-color: #111; color: #fff; padding: 6px 10px; }} .materials-table {{ width: 100%; border-collapse: collapse; margin-top: 5px; }} .materials-table th, .materials-table td {{ border: 1px solid #444; padding: 9px; font-size: 13px; }} .materials-table th {{ background-color: #dddddd; font-weight: bold; }} .signatures {{ margin-top: 70px; width: 100%; border-collapse: collapse; }} .signatures td {{ width: 50%; text-align: center; vertical-align: bottom; height: 50px; font-size: 12px; }} .line {{ border-top: 1px solid #333; width: 75%; margin: 0 auto 6px auto; }}</style></head><body><div class="header"><h1>A CASERNA DESDE 1977</h1><h2>ROMANEIO OPERACIONAL DE PRODUÇÃO</h2></div><table class="info-table"><tr><td rowspan="5" style="width: 140px; text-align: center; vertical-align: middle; padding: 5px; background-color: #fcfcfc;">{img_html}</td><td class="label">Código da OP:</td><td><strong>{id_op}</strong></td><td class="label">Data de Emissão:</td><td><strong>{data_atual}</strong></td></tr><tr><td class="label">Produto Final:</td><td>{prod}</td><td class="label">Grade / Tamanho:</td><td>{tam}</td></tr><tr><td class="label">Qtd Programada:</td><td><strong>{qtd} un</strong></td><td class="label">Custo Material Estimado:</td><td>R$ {custo_estimado:.2f}</td></tr><tr><td class="label">Horário de Início:</td><td>_____:_____</td><td class="label">Horário de Término:</td><td>_____:_____</td></tr><tr><td class="label">Valor Combinado/Hora:</td><td>R$ _____</td><td class="label">Total Mão de Obra:</td><td><strong>R$ _____</strong></td></tr></table><div class="section-title">EXPLOSÃO DE MATERIAIS (SEPARAÇÃO E CORTE)</div><table class="materials-table"><thead><tr><th>Descrição da Matéria-Prima / Insumo</th><th style="text-align: center;">Consumo Unit.</th><th style="text-align: center;">Qtd Total Requerida</th><th>Unidade</th><th style="text-align: center;">Conferido</th></tr></thead><tbody>{html_linhas}</tbody></table><table class="signatures"><tr><td><div class="line"></div>Responsável pela Separação</td><td><div class="line"></div>João (Chão de Fábrica)</td></tr></table><script>window.onload = function() {{ window.print(); }}</script></body></html>"""
                     st.write("")
-                    st.download_button(label="🖨️ Imprimir Romaneio", data=html_romaneio, file_name=f"romaneio_{id_op}.html", mime="text/html", key=f"print_{id_op}")
+                    st.download_button(label="🖨️ Imprimir Romaneio p/ João", data=html_romaneio, file_name=f"romaneio_{id_op}.html", mime="text/html", key=f"print_{id_op}")
     else:
         st.info("Nenhuma OP pendente no momento. O chão de fábrica está livre!")
+
+# =============================================================================
+# MÓDULO NOVO: APONTAMENTO DE HORAS E FECHAMENTO
+# =============================================================================
+elif menu == "⏱️ Apontamento de Horas":
+    st.subheader("⏱️ Fechamento e Custeio de Mão de Obra")
+    st.write("Pegue o Romaneio impresso preenchido pelo João e insira as informações aqui para calcular o custo geral e dar baixa na OP.")
+    
+    conn = conectar_db()
+    df_ops_pend = pd.read_sql("SELECT * FROM ops WHERE status = 'Pendente'", conn)
+    cursor = conn.cursor()
+    cursor.execute("SELECT nome, custo_unitario FROM insumos")
+    custos_atuais = {row[0]: row[1] for row in cursor.fetchall()}
+    cursor.execute("SELECT nome, receita FROM produtos")
+    receitas = {row[0]: json.loads(row[1]) for row in cursor.fetchall()}
+    conn.close()
+
+    if df_ops_pend.empty:
+        st.info("🎉 Nenhuma OP pendente no momento! Todas já foram fechadas.")
+    else:
+        op_sel = st.selectbox("Selecione a OP para Fechamento:", df_ops_pend['id_op'].tolist())
+        row_op = df_ops_pend[df_ops_pend['id_op'] == op_sel].iloc[0]
+        prod = row_op['produto']
+        qtd = int(row_op['quantidade'])
+        receita = receitas.get(prod, {})
+
+        custo_material_real = sum((det['quantidade'] * qtd) * custos_atuais.get(insumo, 0.0) for insumo, det in receita.items())
+
+        with st.container(border=True):
+            st.markdown(f"**OP Selecionada:** {op_sel} | **Produto:** {prod} | **Quantidade:** {qtd} un")
+            st.write("---")
+
+            col_h1, col_h2, col_h3 = st.columns(3)
+            with col_h1:
+                h_inicio = st.time_input("Horário de Início (anotado)", value=datetime.time(8, 0))
+            with col_h2:
+                h_fim = st.time_input("Horário de Término (anotado)", value=datetime.time(12, 0))
+            with col_h3:
+                valor_hora = st.number_input("Valor da Hora Trabalhada (R$):", min_value=0.0, step=1.0, value=15.0)
+
+            # Cálculo de diferença de horas
+            t1 = datetime.datetime.combine(datetime.date.today(), h_inicio)
+            t2 = datetime.datetime.combine(datetime.date.today(), h_fim)
+            if t2 < t1: # Significa que o trabalho passou da meia-noite
+                t2 += datetime.timedelta(days=1)
+
+            diferenca = t2 - t1
+            horas_decimais = diferenca.total_seconds() / 3600
+            custo_mo_real = horas_decimais * valor_hora
+            custo_geral_total = custo_material_real + custo_mo_real
+
+            st.write("---")
+            c_res1, c_res2, c_res3, c_res4 = st.columns(4)
+            c_res1.metric("Tempo Trabalhado", f"{horas_decimais:.2f} hrs")
+            c_res2.metric("Custo do Material", f"R$ {custo_material_real:.2f}")
+            c_res3.metric("Custo Mão de Obra", f"R$ {custo_mo_real:.2f}")
+            c_res4.metric("CUSTO GERAL (Total)", f"R$ {custo_geral_total:.2f}")
+
+            st.write("")
+            if st.button("✅ Confirmar Fechamento e Baixar Estoque", type="primary"):
+                conn = conectar_db()
+                cursor = conn.cursor()
+                
+                # Desconta Insumos do Estoque
+                for insumo, det in receita.items():
+                    consumo_total = det['quantidade'] * qtd
+                    cursor.execute("UPDATE insumos SET estoque = estoque - %s WHERE nome = %s", (consumo_total, insumo))
+
+                # Atualiza a OP para Concluída, salvando o custo_geral e os detalhes da Mão de Obra
+                cursor.execute("""
+                    UPDATE ops 
+                    SET status = 'Concluída', custo_total = %s, custo_mo = %s, tempo_gasto = %s
+                    WHERE id_op = %s
+                """, (custo_geral_total, custo_mo_real, f"{horas_decimais:.2f}h", op_sel))
+
+                conn.commit()
+                conn.close()
+                st.success(f"Excelente! {op_sel} foi fechada com sucesso.")
+                st.rerun()
 
 # =============================================================================
 # MÓDULO 3: HISTÓRICO DE OPs
@@ -279,7 +361,12 @@ elif menu == "📚 Histórico de OPs":
             tam = row['tamanho']
             qtd = int(row['quantidade'])
             status = row['status']
-            custo_final = row['custo_total']
+            
+            # Puxando as novas colunas com segurança
+            custo_final = float(row['custo_total'] if pd.notna(row['custo_total']) else 0.0)
+            custo_mo = float(row['custo_mo']) if 'custo_mo' in row and pd.notna(row['custo_mo']) else 0.0
+            tempo_gasto = row['tempo_gasto'] if 'tempo_gasto' in row and pd.notna(row['tempo_gasto']) else ""
+            custo_mat = custo_final - custo_mo
             
             with st.container(border=True):
                 c_foto, c_info, c_mat, c_custo = st.columns([1.2, 2, 3, 2])
@@ -306,15 +393,21 @@ elif menu == "📚 Histórico de OPs":
                         st.write(f"• {det['quantidade'] * qtd:.2f} {det['unidade']} de {insumo}")
                             
                 with c_custo:
-                    st.markdown(f"💰 **Custo Final (CMV): R$ {custo_final:.2f}**")
+                    st.markdown(f"💰 **Custo Geral: R$ {custo_final:.2f}**")
                     st.caption(f"Custo Unitário da peça: R$ {custo_final/qtd:.2f}")
+                    
+                    if custo_mo > 0:
+                        st.write(f"- Material: R$ {custo_mat:.2f}")
+                        st.write(f"- Mão de Obra: R$ {custo_mo:.2f} ({tempo_gasto})")
+                    else:
+                        st.write("- Sem apontamento de horas.")
                     
                     html_linhas = ""
                     for insumo, det in receita.items():
                         html_linhas += f"<tr><td>{insumo}</td><td style='text-align: center;'>{det['quantidade']:.2f}</td><td style='text-align: center;'><strong>{det['quantidade'] * qtd:.2f}</strong></td><td>{det['unidade']}</td><td style='text-align: center; color: #ccc;'>[  ]</td></tr>"
                     
                     img_html = f'<img src="data:image/jpeg;base64,{base64.b64encode(foto_blob).decode("utf-8")}" style="max-width: 100%; max-height: 120px; object-fit: contain; border-radius: 4px;">' if foto_blob else '<span style="color: #999; font-size: 11px;">FOTO NÃO CADASTRADA</span>'
-                    html_romaneio_hist = f"""<!DOCTYPE html><html><head><meta charset="utf-8"><title>Romaneio_{id_op}</title><style>body {{ font-family: Arial, sans-serif; margin: 35px; color: #222; }} .header {{ text-align: center; border-bottom: 3px double #111; padding-bottom: 10px; margin-bottom: 25px; }} .header h1 {{ margin: 0; font-size: 24px; font-weight: bold; }} .info-table {{ width: 100%; margin-bottom: 25px; border-collapse: collapse; }} .info-table td {{ padding: 9px; border: 1px solid #999; font-size: 13px; }} .info-table td.label {{ font-weight: bold; background-color: #f7f7f7; width: 20%; }} .section-title {{ font-size: 14px; font-weight: bold; margin-top: 25px; background-color: #111; color: #fff; padding: 6px 10px; }} .materials-table {{ width: 100%; border-collapse: collapse; margin-top: 5px; }} .materials-table th, .materials-table td {{ border: 1px solid #444; padding: 9px; font-size: 13px; }} .materials-table th {{ background-color: #dddddd; font-weight: bold; }} .signatures {{ margin-top: 70px; width: 100%; border-collapse: collapse; }} .signatures td {{ width: 50%; text-align: center; vertical-align: bottom; height: 50px; font-size: 12px; }} .line {{ border-top: 1px solid #333; width: 75%; margin: 0 auto 6px auto; }}</style></head><body><div class="header"><h1>A CASERNA DESDE 1977</h1><h2>ROMANEIO OPERACIONAL DE PRODUÇÃO</h2></div><table class="info-table"><tr><td rowspan="3" style="width: 140px; text-align: center; vertical-align: middle; padding: 5px; background-color: #fcfcfc;">{img_html}</td><td class="label">Código da OP:</td><td><strong>{id_op}</strong></td><td class="label">Status:</td><td>{status}</td></tr><tr><td class="label">Produto Final:</td><td>{prod}</td><td class="label">Grade / Tamanho:</td><td>{tam}</td></tr><tr><td class="label">Qtd Produzida:</td><td><strong>{qtd} un</strong></td><td class="label">Custo Final Fechado:</td><td>R$ {custo_final:.2f}</td></tr></table><div class="section-title">EXPLOSÃO DE MATERIAIS UTILIZADOS</div><table class="materials-table"><thead><tr><th>Descrição da Matéria-Prima / Insumo</th><th style="text-align: center;">Consumo Unit.</th><th style="text-align: center;">Qtd Total Requerida</th><th>Unidade</th><th style="text-align: center;">Conferido</th></tr></thead><tbody>{html_linhas}</tbody></table><table class="signatures"><tr><td><div class="line"></div>Responsável pela Separação</td><td><div class="line"></div>Responsável pelo Chão de Fábrica</td></tr></table><script>window.onload = function() {{ window.print(); }}</script></body></html>"""
+                    html_romaneio_hist = f"""<!DOCTYPE html><html><head><meta charset="utf-8"><title>Romaneio_{id_op}</title><style>body {{ font-family: Arial, sans-serif; margin: 35px; color: #222; }} .header {{ text-align: center; border-bottom: 3px double #111; padding-bottom: 10px; margin-bottom: 25px; }} .header h1 {{ margin: 0; font-size: 24px; font-weight: bold; }} .info-table {{ width: 100%; margin-bottom: 25px; border-collapse: collapse; }} .info-table td {{ padding: 9px; border: 1px solid #999; font-size: 13px; }} .info-table td.label {{ font-weight: bold; background-color: #f7f7f7; width: 20%; }} .section-title {{ font-size: 14px; font-weight: bold; margin-top: 25px; background-color: #111; color: #fff; padding: 6px 10px; }} .materials-table {{ width: 100%; border-collapse: collapse; margin-top: 5px; }} .materials-table th, .materials-table td {{ border: 1px solid #444; padding: 9px; font-size: 13px; }} .materials-table th {{ background-color: #dddddd; font-weight: bold; }} .signatures {{ margin-top: 70px; width: 100%; border-collapse: collapse; }} .signatures td {{ width: 50%; text-align: center; vertical-align: bottom; height: 50px; font-size: 12px; }} .line {{ border-top: 1px solid #333; width: 75%; margin: 0 auto 6px auto; }}</style></head><body><div class="header"><h1>A CASERNA DESDE 1977</h1><h2>ROMANEIO OPERACIONAL DE PRODUÇÃO</h2></div><table class="info-table"><tr><td rowspan="4" style="width: 140px; text-align: center; vertical-align: middle; padding: 5px; background-color: #fcfcfc;">{img_html}</td><td class="label">Código da OP:</td><td><strong>{id_op}</strong></td><td class="label">Status:</td><td>{status}</td></tr><tr><td class="label">Produto Final:</td><td>{prod}</td><td class="label">Grade / Tamanho:</td><td>{tam}</td></tr><tr><td class="label">Qtd Produzida:</td><td><strong>{qtd} un</strong></td><td class="label">Custo Geral Fechado:</td><td>R$ {custo_final:.2f}</td></tr><tr><td class="label">Custo Material:</td><td>R$ {custo_mat:.2f}</td><td class="label">Custo Mão de Obra:</td><td>R$ {custo_mo:.2f} ({tempo_gasto})</td></tr></table><div class="section-title">EXPLOSÃO DE MATERIAIS UTILIZADOS</div><table class="materials-table"><thead><tr><th>Descrição da Matéria-Prima / Insumo</th><th style="text-align: center;">Consumo Unit.</th><th style="text-align: center;">Qtd Total Requerida</th><th>Unidade</th><th style="text-align: center;">Conferido</th></tr></thead><tbody>{html_linhas}</tbody></table><table class="signatures"><tr><td><div class="line"></div>Responsável pela Separação</td><td><div class="line"></div>Responsável pelo Chão de Fábrica</td></tr></table><script>window.onload = function() {{ window.print(); }}</script></body></html>"""
                     st.write("")
                     st.download_button(label="🖨️ Imprimir Cópia Histórico", data=html_romaneio_hist, file_name=f"romaneio_{id_op}_hist.html", mime="text/html", key=f"print_hist_{id_op}")
     else:
@@ -377,7 +470,6 @@ elif menu == "📦 Estoque (Entradas/Saídas)":
 # MÓDULO 5: CADASTRO E EDIÇÃO DE FICHAS TÉCNICAS
 # =============================================================================
 elif menu == "🛠️ Fichas Técnicas":
-    # ⚡ OTIMIZAÇÃO: Cria um dicionário de unidades na memória (Zero consultas extras na escolha!)
     conn = conectar_db()
     df_insumos = pd.read_sql("SELECT nome, unidade FROM insumos", conn)
     lista_disp = df_insumos['nome'].tolist()
@@ -399,10 +491,9 @@ elif menu == "🛠️ Fichas Técnicas":
             ins_sel = st.multiselect("Insumos desta receita:", lista_disp)
             receita_temp = {}
             if ins_sel:
-                # ⚡ Puxa da memória instantaneamente
                 for i in ins_sel:
                     u = dict_unidades.get(i, "")
-                    receita_temp[i] = {'whitespace': st.number_input(f"Consumo {i} ({u}):", min_value=0.0, step=0.1, format="%.2f", key=f"c_{i}"), 'unidade': u}
+                    receita_temp[i] = {'quantidade': st.number_input(f"Consumo {i} ({u}):", min_value=0.0, step=0.1, format="%.2f", key=f"c_{i}"), 'unidade': u}
         with col_c2:
             foto_p = st.file_uploader("Foto do Produto", type=["png", "jpg", "jpeg"])
 
@@ -437,7 +528,6 @@ elif menu == "🛠️ Fichas Técnicas":
                 n_ins_sel = st.multiselect("Receita:", lista_disp, default=ins_val)
                 r_edit = {}
                 if n_ins_sel:
-                    # ⚡ Puxa da memória instantaneamente
                     for i in n_ins_sel:
                         u = dict_unidades.get(i, "")
                         v_padrao = dados_ant["receita"].get(i, {}).get("quantidade", 0.0)
@@ -488,7 +578,6 @@ elif menu == "🛠️ Fichas Técnicas":
 # MÓDULO 6: CADASTRO E EDIÇÃO DE INSUMOS
 # =============================================================================
 elif menu == "⚙️ Cadastro de Insumos":
-    # ⚡ OTIMIZAÇÃO: Cria o dicionário direto na memória e fecha a conexão
     conn = conectar_db()
     df_insumos = pd.read_sql("SELECT nome, unidade FROM insumos", conn)
     lista_ins = df_insumos['nome'].tolist()
@@ -525,7 +614,6 @@ elif menu == "⚙️ Cadastro de Insumos":
         else:
             ins_edit = st.selectbox("Selecione:", lista_ins)
             
-            # ⚡ OTIMIZAÇÃO: Busca a unidade sem precisar ir na nuvem!
             u_atual = dict_unidades.get(ins_edit, "Unidades")
             
             c_ed1, c_ed2 = st.columns(2)
