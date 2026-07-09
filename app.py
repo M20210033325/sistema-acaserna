@@ -17,7 +17,6 @@ def criar_tabelas():
     conn = conectar_db()
     cursor = conn.cursor()
     
-    # Criação padrão das tabelas
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS insumos (
             nome TEXT PRIMARY KEY,
@@ -45,7 +44,7 @@ def criar_tabelas():
         )
     ''')
     
-    # Adicionando colunas de Mão de Obra caso não existam (PostgreSQL)
+    # Garante que as colunas de Mão de Obra existam no Supabase
     cursor.execute("ALTER TABLE ops ADD COLUMN IF NOT EXISTS custo_mo DOUBLE PRECISION DEFAULT 0.0")
     cursor.execute("ALTER TABLE ops ADD COLUMN IF NOT EXISTS tempo_gasto TEXT DEFAULT ''")
     
@@ -266,7 +265,7 @@ elif menu == "📋 OPs Ativas":
         st.info("Nenhuma OP pendente no momento. O chão de fábrica está livre!")
 
 # =============================================================================
-# MÓDULO NOVO: APONTAMENTO DE HORAS E FECHAMENTO
+# MÓDULO 3: APONTAMENTO DE HORAS E FECHAMENTO
 # =============================================================================
 elif menu == "⏱️ Apontamento de Horas":
     st.subheader("⏱️ Fechamento e Custeio de Mão de Obra")
@@ -306,11 +305,9 @@ elif menu == "⏱️ Apontamento de Horas":
             with col_h2:
                 h_fim = st.time_input("Horário de Término", value=datetime.time(17, 0))
 
-            # Converte as horas para formato decimal
             h1_dec = h_inicio.hour + h_inicio.minute / 60.0
             h2_dec = h_fim.hour + h_fim.minute / 60.0
             
-            # Trava lógica: O horário de trabalho produtivo é entre 08:00 e 17:00 (Mínimo 8, Máximo 17)
             h1_dec = max(8.0, min(17.0, h1_dec))
             h2_dec = max(8.0, min(17.0, h2_dec))
 
@@ -322,20 +319,19 @@ elif menu == "⏱️ Apontamento de Horas":
             elif dias_diff == 0:
                 horas_calc = max(0.0, h2_dec - h1_dec)
             else:
-                # O expediente padrão é de 9 horas/dia (17h - 8h)
                 horas_primeiro_dia = 17.0 - h1_dec
                 horas_ultimo_dia = h2_dec - 8.0
                 dias_intermediarios = dias_diff - 1
                 horas_calc = horas_primeiro_dia + (dias_intermediarios * 9.0) + horas_ultimo_dia
 
             st.write("---")
-            col_v1, col_v2 = st.columns(2)
-            with col_v1:
-                valor_hora = st.number_input("Valor da Hora Trabalhada (R$):", min_value=0.0, step=1.0, value=15.0)
-            with col_v2:
-                horas_finais = st.number_input("Tempo Calculado (Horas Decimais) - Ajuste se precisar:", min_value=0.0, value=float(max(0.0, horas_calc)), step=0.5)
-                st.caption("O cálculo soma 9h para dias inteiros (das 8h às 17h). Se houve desconto de final de semana, você pode corrigir o valor acima.")
-
+            
+            # TRAVA TRAFÉGO OPERACIONAL: Valor da hora totalmente automatizado com encargos sociais embutidos
+            valor_hora = 13.20  
+            st.info(f"💡 Valor da Hora Trabalhada Automatizado: **R$ {valor_hora:.2f}** (Inclui Provisão de Férias, 13º salário e encargos)")
+            
+            horas_finais = st.number_input("Tempo Calculado (Horas Decimais) - Ajuste se necessário:", min_value=0.0, value=float(max(0.0, horas_calc)), step=0.5)
+            
             custo_mo_real = horas_finais * valor_hora
             custo_geral_total = custo_material_real + custo_mo_real
 
@@ -351,12 +347,10 @@ elif menu == "⏱️ Apontamento de Horas":
                 conn = conectar_db()
                 cursor = conn.cursor()
                 
-                # Desconta Insumos do Estoque
                 for insumo, det in receita.items():
                     consumo_total = det['quantidade'] * qtd
                     cursor.execute("UPDATE insumos SET estoque = estoque - %s WHERE nome = %s", (consumo_total, insumo))
 
-                # Atualiza a OP para Concluída, salvando o custo_geral e os detalhes da Mão de Obra
                 cursor.execute("""
                     UPDATE ops 
                     SET status = 'Concluída', custo_total = %s, custo_mo = %s, tempo_gasto = %s
@@ -369,7 +363,7 @@ elif menu == "⏱️ Apontamento de Horas":
                 st.rerun()
 
 # =============================================================================
-# MÓDULO 3: HISTÓRICO DE OPs
+# MÓDULO 4: HISTÓRICO DE OPs
 # =============================================================================
 elif menu == "📚 Histórico de OPs":
     st.subheader("📚 Histórico de OPs Concluídas")
@@ -386,7 +380,6 @@ elif menu == "📚 Histórico de OPs":
             qtd = int(row['quantidade'])
             status = row['status']
             
-            # Puxando as novas colunas com segurança
             custo_final = float(row['custo_total'] if pd.notna(row['custo_total']) else 0.0)
             custo_mo = float(row['custo_mo']) if 'custo_mo' in row and pd.notna(row['custo_mo']) else 0.0
             tempo_gasto = row['tempo_gasto'] if 'tempo_gasto' in row and pd.notna(row['tempo_gasto']) else ""
@@ -456,8 +449,29 @@ elif menu == "📦 Estoque (Entradas/Saídas)":
             ins_ent = st.selectbox("Material comprado:", df_insumos['Insumo'].tolist(), key="sel_in")
             qtd_ent = st.number_input("Quantidade comprada:", min_value=0.0, step=1.0, key="qtd_in")
             val_ent = st.number_input("Valor TOTAL pago (R$):", min_value=0.0, step=10.0, key="val_in")
+            
+            # POKA-YOKE 1 & 2: Validação de Custo Unitário vs Histórico
+            row_insumo = df_insumos[df_insumos['Insumo'] == ins_ent]
+            c_atual = float(row_insumo.iloc[0]['Custo Médio (R$)']) if not row_insumo.empty else 0.0
+            custo_unit_compra = val_ent / qtd_ent if qtd_ent > 0 else 0.0
+            
+            alerta_preco = False
+            if custo_unit_compra > 0:
+                st.caption(f"💵 Custo Unitário calculado desta compra: **R$ {custo_unit_compra:.2f}**")
                 
-            if st.button("Confirmar Entrada e Atualizar Custo"):
+                # Se o preço novo divergir mais de 2x ou menos de 0.5x do histórico
+                if c_atual > 0 and (custo_unit_compra > c_atual * 2 or custo_unit_compra < c_atual / 2):
+                    alerta_preco = True
+                    st.error(f"⚠️ **Alerta de Digitação Crítico!** O valor unitário (R$ {custo_unit_compra:.2f}) está absurdamente diferente do histórico (R$ {c_atual:.2f}). Verifique pontos, vírgulas e zeros!")
+                    ignorar_alerta = st.checkbox("Confirmo que a discrepância está correta (Preço mudou drasticamente).", key="ignorar_preco")
+            
+            st.write("---")
+            conferido_entrada = st.checkbox("🔴 Confirmo que conferi a quantidade física e o valor total na nota fiscal.", key="conf_entrada")
+            
+            # Bloqueio inteligente do botão de salvamento
+            botao_desabilitado = not conferido_entrada or (alerta_preco and not ignorar_alerta)
+                
+            if st.button("Confirmar Entrada e Atualizar Custo", disabled=botao_desabilitado):
                 if ins_ent and qtd_ent > 0 and val_ent >= 0:
                     conn = conectar_db()
                     cursor = conn.cursor()
@@ -468,7 +482,7 @@ elif menu == "📦 Estoque (Entradas/Saídas)":
                     cursor.execute("UPDATE insumos SET estoque=%s, custo_unitario=%s WHERE nome=%s", (novo_est, novo_custo_med, ins_ent))
                     conn.commit()
                     conn.close()
-                    st.success("Entrada registrada!")
+                    st.success("Entrada registrada com sucesso!")
                     st.rerun()
 
     with col_mov2:
@@ -521,8 +535,16 @@ elif menu == "🛠️ Fichas Técnicas":
         with col_c2:
             foto_p = st.file_uploader("Foto do Produto", type=["png", "jpg", "jpeg"])
 
-        if st.button("Salvar Ficha"):
-            if nome_p and grade_p and receita_temp:
+        # POKA-YOKE 3: Tela de Pré-visualização Crítica para Ficha Nova
+        if nome_p and grade_p and receita_temp:
+            st.write("---")
+            st.markdown("### 📋 Pré-visualização da Nova Engenharia")
+            preview_nova = [{"Insumo": k, "Consumo Unitário": f"{v['quantidade']:.4f}", "Unidade": v['unidade']} for k, v in receita_temp.items()]
+            st.dataframe(pd.DataFrame(preview_nova), use_container_width=True, hide_index=True)
+            
+            conferido_ficha_nova = st.checkbox("Confirmar que revisei as metragens e consumos da engenharia acima.", key="conf_f_nova")
+            
+            if st.button("Salvar Ficha", disabled=not conferido_ficha_nova):
                 conn = conectar_db()
                 cursor = conn.cursor()
                 cursor.execute("""
@@ -533,7 +555,7 @@ elif menu == "🛠️ Fichas Técnicas":
                 """, (nome_p.upper(), json.dumps(grade_p), json.dumps(receita_temp), psycopg2.Binary(foto_p.getvalue()) if foto_p else None))
                 conn.commit()
                 conn.close()
-                st.success("Ficha salva!")
+                st.success("Ficha técnica salva com sucesso!")
                 st.rerun()
                 
     else:
@@ -559,11 +581,18 @@ elif menu == "🛠️ Fichas Técnicas":
             with col_e2:
                 n_foto = st.file_uploader("Substituir Foto", type=["png", "jpg", "jpeg"])
 
-            st.write("---")
-            col_b1, col_b2 = st.columns([1, 1])
-            with col_b1:
-                if st.button("Salvar Alterações"):
-                    if n_nome and n_grade and r_edit:
+            # POKA-YOKE 3: Tela de Pré-visualização Crítica para Alteração de Ficha
+            if n_nome and n_grade and r_edit:
+                st.write("---")
+                st.markdown("### 📋 Pré-visualização das Alterações de Engenharia")
+                preview_edicao = [{"Insumo": k, "Consumo Unitário": f"{v['quantidade']:.4f}", "Unidade": v['unidade']} for k, v in r_edit.items()]
+                st.dataframe(pd.DataFrame(preview_edicao), use_container_width=True, hide_index=True)
+                
+                conferido_ficha_edit = st.checkbox("Confirmar que revisei as novas metragens alteradas.", key="conf_f_edit")
+
+                col_b1, col_b2 = st.columns([1, 1])
+                with col_b1:
+                    if st.button("Salvar Alterações", disabled=not conferido_ficha_edit):
                         conn = conectar_db()
                         cursor = conn.cursor()
                         if n_nome.upper() != p_edit: 
@@ -586,17 +615,17 @@ elif menu == "🛠️ Fichas Técnicas":
                             """, (n_nome.upper(), json.dumps(n_grade), json.dumps(r_edit), f_ant))
                         conn.commit()
                         conn.close()
-                        st.success("Atualizado!")
+                        st.success("Atualizado com sucesso!")
                         st.rerun()
 
-            with col_b2:
-                if st.button("🗑️ Excluir Produto"):
-                    conn = conectar_db()
-                    cursor = conn.cursor()
-                    cursor.execute("DELETE FROM produtos WHERE nome = %s", (p_edit,))
-                    conn.commit()
-                    conn.close()
-                    st.rerun()
+                with col_b2:
+                    if st.button("🗑️ Excluir Produto"):
+                        conn = conectar_db()
+                        cursor = conn.cursor()
+                        cursor.execute("DELETE FROM produtos WHERE nome = %s", (p_edit,))
+                        conn.commit()
+                        conn.close()
+                        st.rerun()
 
 # =============================================================================
 # MÓDULO 6: CADASTRO E EDIÇÃO DE INSUMOS
