@@ -106,7 +106,7 @@ if menu == "📊 Dashboard & DRE":
         col_grafico, col_dre = st.columns([1, 1])
         
         with col_grafico:
-            st.subheader("Custos de Produção por Produto")
+            st.subheader("Custos de Production por Produto")
             df_custo_prod = df_ops_dash[df_ops_dash['status'] == 'Concluída'].groupby('produto').agg(
                 Quantidade_Total=('quantidade', 'sum'),
                 Custo_Total_CMV=('custo_total', 'sum')
@@ -461,7 +461,7 @@ elif menu == "📦 Estoque (Entradas/Saídas)":
                 if custo_unit_compra > 0:
                     st.caption(f"💵 Custo Unitário calculado desta compra: **R$ {custo_unit_compra:.2f}**")
                     
-                    # A CORREÇÃO: Fórmula exata para identificar se o preço subiu mais que o dobro ou caiu pela metade
+                    # CORREÇÃO DEFINITIVA: Sem três pontinhos, lógica matemática limpa
                     if c_atual > 0 and (custo_unit_compra > c_atual * 2 or custo_unit_compra < c_atual / 2):
                         alerta_preco = True
                         st.error(f"⚠️ **Alerta de Digitação Crítico!** O valor unitário (R$ {custo_unit_compra:.2f}) está absurdamente diferente do histórico (R$ {c_atual:.2f}). Verifique pontos, vírgulas e zeros!")
