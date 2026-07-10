@@ -326,8 +326,8 @@ elif menu == "⏱️ Apontamento de Horas":
 
             st.write("---")
             
-            # TRAVA TRAFÉGO OPERACIONAL: Valor da hora totalmente automatizado com encargos sociais embutidos
-            valor_hora = 13.20  
+            # TRAVA TRÁFEGO OPERACIONAL: Valor da hora totalmente automatizado com encargos sociais embutidos
+            valor_hora = 20.06  
             st.info(f"💡 Valor da Hora Trabalhada Automatizado: **R$ {valor_hora:.2f}** (Inclui Provisão de Férias, 13º salário e encargos)")
             
             horas_finais = st.number_input("Tempo Calculado (Horas Decimais) - Ajuste se necessário:", min_value=0.0, value=float(max(0.0, horas_calc)), step=0.5)
@@ -431,7 +431,7 @@ elif menu == "📚 Histórico de OPs":
         st.info("O histórico de OPs está vazio.")
 
 # =============================================================================
-# MÓDULO 4: CONTROLE DE ESTOQUE E VALORAÇÃO
+# MÓDULO 5: CONTROLE DE ESTOQUE E VALORAÇÃO
 # =============================================================================
 elif menu == "📦 Estoque (Entradas/Saídas)":
     st.subheader("🔄 Movimentação e Valoração de Estoque")
@@ -450,25 +450,26 @@ elif menu == "📦 Estoque (Entradas/Saídas)":
             qtd_ent = st.number_input("Quantidade comprada:", min_value=0.0, step=1.0, key="qtd_in")
             val_ent = st.number_input("Valor TOTAL pago (R$):", min_value=0.0, step=10.0, key="val_in")
             
-            # POKA-YOKE 1 & 2: Validação de Custo Unitário vs Histórico
-            row_insumo = df_insumos[df_insumos['Insumo'] == ins_ent]
-            c_atual = float(row_insumo.iloc[0]['Custo Médio (R$)']) if not row_insumo.empty else 0.0
-            custo_unit_compra = val_ent / qtd_ent if qtd_ent > 0 else 0.0
-            
             alerta_preco = False
-            if custo_unit_compra > 0:
-                st.caption(f"💵 Custo Unitário calculado desta compra: **R$ {custo_unit_compra:.2f}**")
+            ignorar_alerta = False
+            
+            if ins_ent and not df_insumos.empty:
+                row_insumo = df_insumos[df_insumos['Insumo'] == ins_ent]
+                c_atual = float(row_insumo.iloc[0]['Custo Médio (R$)']) if not row_insumo.empty else 0.0
+                custo_unit_compra = val_ent / qtd_ent if qtd_ent > 0 else 0.0
                 
-                # Se o preço novo divergir mais de 2x ou menos de 0.5x do histórico
-                if c_atual > 0 and (custo_unit_compra > c_atual * 2 or custo_unit_compra < c_atual / 2):
-                    alerta_preco = True
-                    st.error(f"⚠️ **Alerta de Digitação Crítico!** O valor unitário (R$ {custo_unit_compra:.2f}) está absurdamente diferente do histórico (R$ {c_atual:.2f}). Verifique pontos, vírgulas e zeros!")
-                    ignorar_alerta = st.checkbox("Confirmo que a discrepância está correta (Preço mudou drasticamente).", key="ignorar_preco")
+                if custo_unit_compra > 0:
+                    st.caption(f"💵 Custo Unitário calculado desta compra: **R$ {custo_unit_compra:.2f}**")
+                    
+                    # A CORREÇÃO: Fórmula exata para identificar se o preço subiu mais que o dobro ou caiu pela metade
+                    if c_atual > 0 and (custo_unit_compra > c_atual * 2 or custo_unit_compra < c_atual / 2):
+                        alerta_preco = True
+                        st.error(f"⚠️ **Alerta de Digitação Crítico!** O valor unitário (R$ {custo_unit_compra:.2f}) está absurdamente diferente do histórico (R$ {c_atual:.2f}). Verifique pontos, vírgulas e zeros!")
+                        ignorar_alerta = st.checkbox("Confirmo que a discrepância está correta (Preço mudou drasticamente).", key="ignorar_preco")
             
             st.write("---")
             conferido_entrada = st.checkbox("🔴 Confirmo que conferi a quantidade física e o valor total na nota fiscal.", key="conf_entrada")
             
-            # Bloqueio inteligente do botão de salvamento
             botao_desabilitado = not conferido_entrada or (alerta_preco and not ignorar_alerta)
                 
             if st.button("Confirmar Entrada e Atualizar Custo", disabled=botao_desabilitado):
@@ -505,7 +506,7 @@ elif menu == "📦 Estoque (Entradas/Saídas)":
     st.dataframe(df_visual_insumos, use_container_width=True, hide_index=True)
 
 # =============================================================================
-# MÓDULO 5: CADASTRO E EDIÇÃO DE FICHAS TÉCNICAS
+# MÓDULO 6: CADASTRO E EDIÇÃO DE FICHAS TÉCNICAS
 # =============================================================================
 elif menu == "🛠️ Fichas Técnicas":
     conn = conectar_db()
@@ -535,7 +536,6 @@ elif menu == "🛠️ Fichas Técnicas":
         with col_c2:
             foto_p = st.file_uploader("Foto do Produto", type=["png", "jpg", "jpeg"])
 
-        # POKA-YOKE 3: Tela de Pré-visualização Crítica para Ficha Nova
         if nome_p and grade_p and receita_temp:
             st.write("---")
             st.markdown("### 📋 Pré-visualização da Nova Engenharia")
@@ -581,7 +581,6 @@ elif menu == "🛠️ Fichas Técnicas":
             with col_e2:
                 n_foto = st.file_uploader("Substituir Foto", type=["png", "jpg", "jpeg"])
 
-            # POKA-YOKE 3: Tela de Pré-visualização Crítica para Alteração de Ficha
             if n_nome and n_grade and r_edit:
                 st.write("---")
                 st.markdown("### 📋 Pré-visualização das Alterações de Engenharia")
@@ -628,7 +627,7 @@ elif menu == "🛠️ Fichas Técnicas":
                         st.rerun()
 
 # =============================================================================
-# MÓDULO 6: CADASTRO E EDIÇÃO DE INSUMOS
+# MÓDULO 7: CADASTRO E EDIÇÃO DE INSUMOS
 # =============================================================================
 elif menu == "⚙️ Cadastro de Insumos":
     conn = conectar_db()
