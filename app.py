@@ -44,7 +44,6 @@ def criar_tabelas():
         )
     ''')
     
-    # Garante que as colunas de Mão de Obra existam no Supabase
     cursor.execute("ALTER TABLE ops ADD COLUMN IF NOT EXISTS custo_mo DOUBLE PRECISION DEFAULT 0.0")
     cursor.execute("ALTER TABLE ops ADD COLUMN IF NOT EXISTS tempo_gasto TEXT DEFAULT ''")
     
@@ -106,7 +105,7 @@ if menu == "📊 Dashboard & DRE":
         col_grafico, col_dre = st.columns([1, 1])
         
         with col_grafico:
-            st.subheader("Custos de Production por Produto")
+            st.subheader("Custos de Produção por Produto")
             df_custo_prod = df_ops_dash[df_ops_dash['status'] == 'Concluída'].groupby('produto').agg(
                 Quantidade_Total=('quantidade', 'sum'),
                 Custo_Total_CMV=('custo_total', 'sum')
@@ -326,7 +325,6 @@ elif menu == "⏱️ Apontamento de Horas":
 
             st.write("---")
             
-            # TRAVA TRÁFEGO OPERACIONAL: Valor da hora totalmente automatizado com encargos sociais embutidos
             valor_hora = 20.06  
             st.info(f"💡 Valor da Hora Trabalhada Automatizado: **R$ {valor_hora:.2f}** (Inclui Provisão de Férias, 13º salário e encargos)")
             
@@ -461,11 +459,10 @@ elif menu == "📦 Estoque (Entradas/Saídas)":
                 if custo_unit_compra > 0:
                     st.caption(f"💵 Custo Unitário calculado desta compra: **R$ {custo_unit_compra:.2f}**")
                     
-                    # CORREÇÃO DEFINITIVA: Sem três pontinhos, lógica matemática limpa
                     if c_atual > 0 and (custo_unit_compra > c_atual * 2 or custo_unit_compra < c_atual / 2):
                         alerta_preco = True
                         st.error(f"⚠️ **Alerta de Digitação Crítico!** O valor unitário (R$ {custo_unit_compra:.2f}) está absurdamente diferente do histórico (R$ {c_atual:.2f}). Verifique pontos, vírgulas e zeros!")
-                        ignorar_alerta = st.checkbox("Confirmo que a discrepância está correta (Preço mudou drasticamente).", key="ignorar_preco")
+                        ignorar_alerta = st.checkbox("Confirmo que a discrepância está correta.", key="ignorar_preco")
             
             st.write("---")
             conferido_entrada = st.checkbox("🔴 Confirmo que conferi a quantidade física e o valor total na nota fiscal.", key="conf_entrada")
@@ -596,6 +593,7 @@ elif menu == "🛠️ Fichas Técnicas":
                         cursor = conn.cursor()
                         if n_nome.upper() != p_edit: 
                             cursor.execute("DELETE FROM produtos WHERE nome = %s", (p_edit,))
+                        
                         if n_foto:
                             cursor.execute("""
                                 INSERT INTO produtos (nome, grade, receita, foto) 
@@ -605,13 +603,16 @@ elif menu == "🛠️ Fichas Técnicas":
                             """, (n_nome.upper(), json.dumps(n_grade), json.dumps(r_edit), psycopg2.Binary(n_foto.getvalue())))
                         else:
                             cursor.execute("SELECT foto FROM produtos WHERE nome = %s", (p_edit,))
-                            f_ant = cursor.fetchone()[0] if cursor.rowcount > 0 else None
+                            row_f = cursor.fetchone()
+                            f_ant = row_f[0] if row_f else None
+                            
                             cursor.execute("""
                                 INSERT INTO produtos (nome, grade, receita, foto) 
                                 VALUES (%s, %s, %s, %s)
                                 ON CONFLICT (nome) DO UPDATE 
                                 SET grade = EXCLUDED.grade, receita = EXCLUDED.receita, foto = EXCLUDED.foto
                             """, (n_nome.upper(), json.dumps(n_grade), json.dumps(r_edit), f_ant))
+                            
                         conn.commit()
                         conn.close()
                         st.success("Atualizado com sucesso!")
