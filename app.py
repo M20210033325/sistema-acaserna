@@ -10,6 +10,7 @@ st.set_page_config(layout="wide", page_title="Sistema de Produção Militar")
 # =============================================================================
 # 1. FUNÇÕES DO BANCO DE DADOS (SUPABASE)
 # =============================================================================
+# forçando atualização de dependências
 def conectar_db():
     return psycopg2.connect(st.secrets["DATABASE_URL"])
 
